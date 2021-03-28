@@ -1,7 +1,5 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sqlite3.h>
+#include "../include/admin_scenario.h"
 
 int callback(void* NotUsed, int argc, char** argv, char** azColName) {
     printf("\n\n***********************************************\n");
@@ -12,35 +10,12 @@ int callback(void* NotUsed, int argc, char** argv, char** azColName) {
     return 0;
 }
 
-int select_db(sqlite3* db);
-int modify_db(sqlite3* db);
-
-int choose_table();
-int check_cargo_weight(sqlite3* db, int id, int cargo_weight);
-int drivers_salary_for_the_period(sqlite3* db, char* start_date, char* end_date);
-int driver_salary_for_the_period(sqlite3* db, char* start_date, char* end_date, char* surname);
-
-int main()
+int admin_access(sqlite3* db)
 {
-    sqlite3* db;
-    char* err_msg = 0;
-    sqlite3_stmt* res = 0;
-
-    int rc = sqlite3_open("auto_park.db", &db);
-
-    if (rc != SQLITE_OK) {
-        printf("Can't open database: %s.\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
-        return -1;
-    }
-    else {
-        printf("Opened database successfully.\n");
-    }
-
     int isAllRight = 1;
     while (isAllRight)
     {
-        printf("Choose the action:\n\t1) Show info\n\t2) Modify\n\t3) Exit\naction: ");
+        printf("Choose the action:\n\t1) Show info\n\t2) Modify\n\t3) Logout\naction: ");
         int action_id;
         scanf("%d", &action_id);
 
@@ -55,7 +30,7 @@ int main()
                 isAllRight = 0;
             break;
         case 3:
-            printf("End of programm.\n");
+            printf("Logout.\n");
             isAllRight = 0;
             break;
         default:
@@ -64,11 +39,7 @@ int main()
             break;
         }
     }
-
-    sqlite3_finalize(res);
-    sqlite3_close(db);
-
-    return 0;
+    return isAllRight;
 }
 
 int driver_salary_for_the_period(sqlite3* db, char* start_date, char* end_date, char* surname)
@@ -226,7 +197,7 @@ int select_db(sqlite3* db)
          from vechicles as v inner join orders on v.id = orders.car_id group by orders.car_id);"
     };
 
-    int col_number[2] = {7, 5};
+    int col_number[2] = { 7, 5 };
 
     int count_queries = sizeof(query_name) / sizeof(query_name[0]);
     int query_id = 0;
@@ -513,7 +484,7 @@ int modify_db(sqlite3* db)
         return -3;
     }
 
-    if(res != 0)
+    if (res != 0)
         sqlite3_finalize(res);
 
     return 0;
