@@ -4,10 +4,11 @@
 #include <sqlite3.h>
 
 int callback(void* NotUsed, int argc, char** argv, char** azColName) {
+    printf("\n\n***********************************************\n");
     for (int i = 0; i < argc; i++) {
         printf("%s = %s\n", azColName[i], argv[i] ? argv[i] : "NULL");
     }
-    printf("\n");
+    printf("***********************************************\n\n");
     return 0;
 }
 
@@ -15,6 +16,9 @@ int select_db(sqlite3* db);
 int modify_db(sqlite3* db);
 
 int choose_table();
+int check_cargo_weight(sqlite3* db, int id, int cargo_weight);
+int drivers_salary_for_the_period(sqlite3* db, char* start_date, char* end_date);
+int driver_salary_for_the_period(sqlite3* db, char* start_date, char* end_date, char* surname);
 
 int main()
 {
@@ -67,6 +71,98 @@ int main()
     return 0;
 }
 
+int driver_salary_for_the_period(sqlite3* db, char* start_date, char* end_date, char* surname)
+{
+    char* query = "select drivers.id, drivers.surname, sum(orders.cost) * 0.2 as salary,\
+                   min(orders.date) as start_date,\
+                   max(orders.date) as end_date from drivers inner join orders on drivers.id=orders.driver_id\
+                   where orders.date between ? and ? and drivers.surname = ? group by drivers.id=orders.driver_id;";
+
+    sqlite3_stmt* res;
+    int rc = sqlite3_prepare_v2(db, query, -1, &res, 0);
+    if (rc != SQLITE_OK) {
+        printf("Failed to execute statement: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    sqlite3_bind_text(res, 1, start_date, -1, NULL);
+    sqlite3_bind_text(res, 2, end_date, -1, NULL);
+    sqlite3_bind_text(res, 3, surname, -1, NULL);
+
+    while (sqlite3_step(res) == SQLITE_ROW) {
+        printf("\n***********************************************\n");
+        for (int i = 0; i < 5; i++)
+            printf("%s - %s\n", sqlite3_column_name(res, i), sqlite3_column_text(res, i));
+        printf("\n***********************************************\n\n");
+    }
+    sqlite3_finalize(res);
+
+    return 1;
+}
+
+int drivers_salary_for_the_period(sqlite3* db, char* start_date, char* end_date)
+{
+    char* create_table = "drop table if exists salary_for_period;\
+                          create table salary_for_period(id, surname, salary, start_date, end_date);";
+
+    char* query = "insert into salary_for_period select drivers.id, drivers.surname, sum(orders.cost) * 0.2 as salary,\
+                   min(orders.date) as start_date,\
+                   max(orders.date) as end_date from drivers inner join orders on drivers.id=orders.driver_id\
+                   where orders.date between ? and ? group by orders.driver_id;";
+
+    char* err_msg;
+    int rc = sqlite3_exec(db, create_table, 0, 0, &err_msg);
+
+    if (rc != SQLITE_OK) {
+        printf("SQL error: %s\n", err_msg);
+        sqlite3_free(err_msg);
+        return -1;
+    }
+
+    sqlite3_stmt* res;
+    rc = sqlite3_prepare_v2(db, query, -1, &res, 0);
+    if (rc != SQLITE_OK) {
+        printf("Failed to execute statement: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    sqlite3_bind_text(res, 1, start_date, -1, NULL);
+    sqlite3_bind_text(res, 2, end_date, -1, NULL);
+
+    while (sqlite3_step(res) == SQLITE_ROW);
+    sqlite3_finalize(res);
+
+    return 1;
+}
+
+int check_cargo_weight(sqlite3* db, int id, int cargo_weight)
+{
+    char* query = "select capacity from vechicles where id = ?";
+    sqlite3_stmt* res;
+    int rc = sqlite3_prepare_v2(db, query, -1, &res, 0);
+    if (rc != SQLITE_OK) {
+        printf("Failed to execute statement: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    sqlite3_bind_int(res, 1, id);
+
+    if (!(sqlite3_step(res) == SQLITE_ROW))
+    {
+        printf("Cannot perform query.\n");
+        sqlite3_finalize(res);
+        return 0;
+    }
+    int capacity = sqlite3_column_int(res, 0);
+    if (capacity >= cargo_weight) {
+        sqlite3_finalize(res);
+        return 1;
+    }
+
+    sqlite3_finalize(res);
+    return 0;
+}
+
 int choose_table()
 {
     int table_id = 0;
@@ -101,7 +197,9 @@ int select_db(sqlite3* db)
         "for the specified vehicle - total mileage and total weight of transported goods",
         "for each driver - total number of trips, total weight transported goods, the amount of money earned",
         "for the driver who completed the least number of trips - all information and the amount of money received",
-        "for a car with the highest total mileage - all information"
+        "for a car with the highest total mileage - all information",
+        "determines the amount of money for the specified period, credited to each driver for transportation.",
+        "determines the amount of money for the specified period, credited to the specified driver for transportation."
     };
 
     char* select_all[] = {
@@ -152,7 +250,6 @@ int select_db(sqlite3* db)
 
         char* err_msg = 0;
 
-        printf("\n\n***********************************************\n");
         int rc = sqlite3_exec(db, select_all[table_id - 1], callback, 0, &err_msg);
 
         if (rc != SQLITE_OK) {
@@ -163,7 +260,47 @@ int select_db(sqlite3* db)
             sqlite3_free(err_msg);
             return -3;
         }
-        printf("***********************************************\n\n");
+    }
+    else if (query_id == 7) {
+        char date1[11];
+        char date2[11];
+
+        printf("Enter dates in format yyyy-mm-dd:\n\tstart date: ");
+        scanf("%10s", date1);
+        printf("\tend date: ");
+        scanf("%10s", date2);
+
+        if (!drivers_salary_for_the_period(db, date1, date2)) {
+            printf("Cannot perform query.\n");
+            return -7;
+        }
+
+        char* err_msg;
+        int rc = sqlite3_exec(db, "select * from salary_for_period", callback, 0, &err_msg);
+
+        if (rc != SQLITE_OK) {
+            printf("SQL error: %s\n", err_msg);
+            sqlite3_free(err_msg);
+            return -8;
+        }
+    }
+    else if (query_id == 8) {
+        char date1[11];
+        char date2[11];
+        char surname[30];
+
+        printf("Enter dates in format yyyy-mm-dd:\n\tstart date: ");
+        scanf("%10s", date1);
+        printf("\tend date: ");
+        scanf("%10s", date2);
+
+        printf("Enter driver surename: ");
+        scanf("%29s", surname);
+
+        if (!driver_salary_for_the_period(db, date1, date2, surname)) {
+            printf("Cannot perform query.\n");
+            return -8;
+        }
     }
     else
     {
@@ -194,10 +331,12 @@ int select_db(sqlite3* db)
             sqlite3_bind_text(res, 3, date2, -1, NULL);
 
             while (sqlite3_step(res) == SQLITE_ROW) {
+                printf("\n***********************************************\n");
                 for (int i = 0; i < col_number[query_id]; i++)
                     printf("%s - %s\n", sqlite3_column_name(res, i), sqlite3_column_text(res, i));
-                printf("\n");
+                printf("\n***********************************************\n\n");
             }
+            sqlite3_finalize(res);
         }
         else if (query_id == 1) {
             sqlite3_stmt* res;
@@ -215,10 +354,12 @@ int select_db(sqlite3* db)
             sqlite3_bind_int(res, 1, id);
 
             while (sqlite3_step(res) == SQLITE_ROW) {
+                printf("\n***********************************************\n");
                 for (int i = 0; i < col_number[query_id]; i++)
                     printf("%s - %s\n", sqlite3_column_name(res, i), sqlite3_column_text(res, i));
-                printf("\n");
+                printf("\n***********************************************\n\n");
             }
+            sqlite3_finalize(res);
         }
         else {
             char* err_msg;
@@ -303,6 +444,15 @@ int modify_db(sqlite3* db)
 
         for (int i = 1; i < col_number[table_id - 1]; i++)
             sqlite3_bind_text(res, i, values[i - 1], -1, NULL);
+
+        if (table_id == 4) {
+            if (!check_cargo_weight(db, atoi(values[2]), atoi(values[4])))
+            {
+                printf("Cargo weight can't be bigger then car capacity.\n");
+                return 0;
+            }
+        }
+
         while (sqlite3_step(res) == SQLITE_ROW);
         break;
     }
@@ -330,6 +480,15 @@ int modify_db(sqlite3* db)
         for (int i = 1; i < col_number[table_id - 1]; i++)
             sqlite3_bind_text(res, i, values[i - 1], -1, NULL);
         sqlite3_bind_int(res, col_number[table_id - 1], id);
+
+        if (table_id == 4) {
+            if (!check_cargo_weight(db, atoi(values[2]), atoi(values[4])))
+            {
+                printf("Cargo weight can't be bigger then car capacity.\n");
+                return 0;
+            }
+        }
+
         while (sqlite3_step(res) == SQLITE_ROW);
         break;
     }
